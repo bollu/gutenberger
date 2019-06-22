@@ -34,29 +34,49 @@ dfa2nfa (DFA su si sf t) = NFA su si sf t'
   where t' = \a s -> S.singleton $ t a s
 
 
--- | Remove unreachable states from the DFA for a fixed
--- input alphabet
-dfaRemoveUnreachable :: S.Set a -- ^ input alphabet
+-- | Remove unreachable states from the DFA after a fixed
+-- number of steps for a given alphabet.
+-- Note that for us, number of steps = max bit-width
+-- and alphabet should usually be all bitstrings that have variables
+-- we care about toggled.
+dfaRemoveUnreachableAfterN :: Int -- ^ number of steps
+                     -> S.Set a -- ^ alphabet
                      -> DFA a
                      -> DFA a
-dfaRemoveUnreachable as dfa@(DFA su si sf t) =
+dfaRemoveUnreachableAfterN n as (DFA su si sf t) =
     let next ss = (foldMap (\s -> (S.map (`t` s) as)) ss) `S.union` ss
-        reached = transitiveClosure next si
-        unreached = su S.\\ reached
-    in (DFA su si (sf S.\\ unreached) t)
+        reached i ss = if i == 0 then ss else reached (i-1) (next ss)
+        unreached = su S.\\ reached n si
+    in (DFA (su S.\\ unreached) si (sf S.\\ unreached) t)
 
--- | Minimal dfa
-dfaMinimal :: DFA a -> DFA a
-dfaMinimal = undefined
 
+-- https://en.wikipedia.org/wiki/DFA_minimization#Hopcroft's_algorithm
+{-
+dfaRefinePartition :: S.Set a -- ^ Alphabet
+  -> (s -> a -> s) -- transition
+  -> S.Set s -- universe (U)
+  -> S.Set (S.Set s) -- partition (P)
+  -> [(S.Set s)] -- worklist (W)
+  -> (S.Set (S.Set s)) -- new parittion
+dfaRefinePartition as t su p [] = p
+dfaRefinePartition as t p (w:ws) =
+    -- | Find all precessors to ss on alphabet s
+    let pred a ss = S.filter (\s -> S.member (t s u) ss) su
+    in reverse foldMap as $ \a ->
+        let predW = pred a w
+-}
+
+-- | Minimal dfa for a given alphabet after n steps
+dfaMinimalAfterN :: Int -> S.Set a -> DFA a -> DFA a
+dfaMinimalAfterN = dfaRemoveUnreachableAfterN
 
 -- | nfa reversal
 -- To transition, apply the transition map on the universe,
 -- and keep all the sets that reach the current set. This is
--- effectively a reverse of the NFA transition, since we now return
+-- effectively a nfaReverse of the NFA transition, since we now return
 -- all sets that _enter_ the current set.
-reverse :: NFA a -> NFA a
-reverse (NFA su si sf t) =
+nfaReverse :: NFA a -> NFA a
+nfaReverse (NFA su si sf t) =
     NFA su sf si $ \a s -> S.filter (S.member s . t a) su
 
 -- | NFA that accepts all states
@@ -67,12 +87,23 @@ univ = let su = S.singleton () in NFA su su su (\ _ _ -> su)
 empty :: NFA a
 empty = let su = S.singleton () in NFA su su S.empty (\ _ _ -> su)
 
-nfaStateSpaceCard :: NFA a -> Int
-nfaStateSpaceCard (NFA su _ _ _) = S.size su
+-- | Return the state space, # of initial states, # of final states
+nfaStateSpaceCard :: NFA a -> (Int, Int, Int)
+nfaStateSpaceCard (NFA su si sf _) = (S.size su, S.size si, S.size sf)
+
+
+dfaStateSpaceCard :: DFA a -> (Int, Int, Int)
+dfaStateSpaceCard (DFA su si sf _) = (S.size su, S.size si, S.size sf)
 
 
 debugNFA :: NFA a -> IO ()
-debugNFA (NFA su si sf t)= do
+debugNFA (NFA su si sf t) = do
+    putStrLn $ "univ: " <> show su
+    putStrLn $ "initial: " <> show su
+    putStrLn $ "final: " <> show su
+
+debugDFA :: DFA a -> IO ()
+debugDFA (DFA su si sf t) = do
     putStrLn $ "univ: " <> show su
     putStrLn $ "initial: " <> show su
     putStrLn $ "final: " <> show su
@@ -147,6 +178,18 @@ visitedAlphabet t as =
   let next ss = foldMap (\s -> foldMap (`t` s) as) ss
   in transitiveClosure $ \ss -> next ss `S.union` ss
 
+
+visitedAlphabetN :: (Ord s, Ord a) => (a -> s -> S.Set s) -- transition relation
+ -> Int -- ^ number of steps
+ -> S.Set a -- ^ alphabet
+ -> S.Set s -- ^ initial state
+ -> S.Set s -- ^ all reachable states
+visitedAlphabetN t 0 _ si = si
+visitedAlphabetN t n as si =
+  -- | All possible transitions from all possible sets
+  let si' = foldMap (\s -> foldMap (`t` s) as) si
+   in visitedAlphabetN t (n-1) as si'
+
 -- | Check whether NFA accepts
 runNFA :: NFA a -> [a] -> Bool
 runNFA (NFA _ si sf t) aa = intersects (nondetSequence t aa si) sf
@@ -161,6 +204,12 @@ newtype BV = BV Int deriving(Eq, Ord, Show, Bits)
 
 (.!.) :: BV -> Int -> Bool
 (.!.) (BV bv) ix = testBit bv ix
+
+-- | Given indeces, create powerset of bitvectors with those indeces toggled
+bvPowerSet :: S.Set Int -> S.Set BV
+bvPowerSet ixs =
+    S.mapMonotonic (\setIx -> foldl (\bv ix -> bv `setBit` ix) (BV 0) setIx)
+    (S.powerSet ixs)
 
 -- | Common boolean sets.
 sb, sf, st :: S.Set Bool
@@ -240,6 +289,12 @@ acceptsEmpty (NFA su si sf t) = intersects si sf
 eg1 = forall 1 $ forall  0 $ eq 0 1
 
 
+-- | Same as eg1, but with minmize in between
+eg1' =
+    let minimize = nfaMinimalAfterN 64 (bvPowerSet $ S.fromList $ [0..1])
+     in minimize $ forall 1 $ minimize $ forall 0 $ eq 0 1
+
+
 -- | forall x. exists y. eq x y
 -- acceptsEmpty eg2 = true
 eg2 = forall 1 $ exists  0 $ eq 0 1
@@ -259,3 +314,17 @@ main = do
     assert_ (acceptsEmpty eg2 == True) "eg2"
     assert_ (acceptsEmpty eg3 == False) "eg3"
     putStrLn $ "presburger"
+
+nfaComplement' :: Int  -- ^ Number of steps
+               -> S.Set a --  ^ Alphabet
+               -> NFA a
+               -> NFA a
+nfaComplement' n as =
+  dfa2nfa . dfaMinimalAfterN n as . dfaComplement  . nfa2dfa
+
+
+nfaMinimalAfterN :: Ord a => Int -> S.Set a -> NFA a -> NFA a
+nfaMinimalAfterN n as (NFA su si sf t) =
+    let reached = visitedAlphabetN t n as si
+    in NFA (S.intersection su reached) si (S.intersection sf reached) t
+
