@@ -235,6 +235,19 @@ forall i = nfaComplement . exists i . nfaComplement
 acceptsEmpty :: NFA a -> Bool
 acceptsEmpty (NFA su si sf t) = intersects si sf
 
+-- | forall x. forall y. eq x y
+-- acceptsEmpty eg1 =  False
+eg1 = forall 1 $ forall  0 $ eq 0 1
+
+
+-- | forall x. exists y. eq x y
+-- acceptsEmpty eg2 = true
+eg2 = forall 1 $ exists  0 $ eq 0 1
+
+
+-- | exists x. forall y. eq x y
+-- acceptsEmpty eg2 = false
+eg3 = exists 1 $ forall  0 $ eq 0 1
 
 main :: IO ()
 main = putStrLn $ "presburger"
