@@ -249,5 +249,13 @@ eg2 = forall 1 $ exists  0 $ eq 0 1
 -- acceptsEmpty eg2 = false
 eg3 = exists 1 $ forall  0 $ eq 0 1
 
+assert_ :: Bool -> String -> IO ()
+assert_ True _ = pure ()
+assert_ False s = error $ "failed check: " <> s
+
 main :: IO ()
-main = putStrLn $ "presburger"
+main = do
+    assert_ (acceptsEmpty eg1 == False) "eg1"
+    assert_ (acceptsEmpty eg2 == True) "eg2"
+    assert_ (acceptsEmpty eg3 == False) "eg3"
+    putStrLn $ "presburger"
