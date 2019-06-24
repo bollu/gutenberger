@@ -5,6 +5,7 @@
 import qualified Data.Set as S
 import Data.Bits
 import Data.Monoid
+import Test.QuickCheck
 
 -- | floor division. 3/2 = 1, (-3)/2 = -2
 (//) :: Integral a => a -> a -> a
@@ -219,6 +220,11 @@ type Var = Int
 
 -- | Bitvector.
 newtype BV = BV Int deriving(Eq, Ord, Show, Bits)
+
+-- Infix testBit.
+(.!.) :: BV -> Int -> Bool
+(.!.) (BV bv) ix = testBit bv ix
+
 -- | little endian: 0th bit goes to least positoin
 -- eg. False False True --> 1 0 0
 -- eg. True False False --> 0 0 1
@@ -226,9 +232,15 @@ newtype BV = BV Int deriving(Eq, Ord, Show, Bits)
 toBV :: [Bool] -> BV
 toBV bs = BV $ sum $ zipWith (\b ix -> if b then shiftL 1 ix else 0) bs [0,1..]
 
--- Infix testBit.
-(.!.) :: BV -> Int -> Bool
-(.!.) (BV bv) ix = testBit bv ix
+
+-- | QuickCheck for toBV
+qcToBV :: [Bool] -> Bool
+qcToBV bs =
+  let l = length bs
+      ixs = [0..(l-1)]
+   in
+   if l > 31 then True
+   else getAll $ mconcat $ map All $ map (\ix -> toBV bs .!. ix == bs !! ix) ixs
 
 -- | Given indeces, create powerset of bitvectors with those indeces toggled
 bvPowerSet :: S.Set Int -> S.Set BV
@@ -584,14 +596,16 @@ mkInputBitsNatural xs =
   let maxPow2 = foldl1 max (map nbitsNatural xs) in
   map (\i -> toBV $ map (`testBit` i) xs) [0..(maxPow2 - 1)]
 
-prop_dfa_bv :: [(Int, Int)] -> Int -> Bool
-prop_dfa_bv asAndXs p =
+
+-- quickCheck property for presburget set on naturals
+qcDFAPresburgerNatural :: [(Int, Int)] -> Int -> Bool
+qcDFAPresburgerNatural asAndXs p =
     let as = map fst asAndXs
         xs = map (abs . snd) asAndXs
         out = sum (zipWith (*) as xs) <= p
         dfa = dfaPresburgerNatural (as, p)
-        dfaInput = undefined
-     in undefined
+        dfaInput = mkInputBitsNatural xs
+     in runDFA dfa  dfaInput == out
 
 main :: IO ()
 main = do
@@ -605,4 +619,6 @@ main = do
     assert_ (runDFA eg4 [BV 1] == True) "eg4 - 1"
     assert_ (runDFA eg4 [BV 2] == False) "eg4 - 2"
     assert_ (runDFA eg4 [BV 3] == False) "eg4 - 3"
+
+    quickCheck qcToBV
     putStrLn $ "presburger"
