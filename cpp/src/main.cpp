@@ -4,7 +4,7 @@
 #include <array>
 #include <set>
 
-// Automata theory // An algorithmic approach
+// Automata theory: An algorithmic approach
 // https://www7.in.tum.de/~esparza/autoskript.pdf - Chapter 10: Applications III - presburger arithmetic
 
 // https://www7.in.tum.de/um/courses/auto/ws1718/slides1718/09-Presburger_Arithmetic.pdf
@@ -22,7 +22,7 @@ bool avxSupported = false;
 // S = number of states, I = number of inputs
 // A = automata class
 template<int S>
-struct A { 
+struct A {
     // transition table. S x Bool -> S
     int t[S][2];
     // encodes whether the state f[i] is a final state.
@@ -48,7 +48,7 @@ A<1> empty() {
 template<int n>
 void complement(A<n> &a) {
     #pragma omp simd
-    for(int i = 0; i < n; ++i) 
+    for(int i = 0; i < n; ++i)
         a.f[i] = !a.f[i];
 }
 
@@ -79,7 +79,7 @@ struct NA {
         x.c();
         return x;
     }
-    
+
 
     //complement
     void inline c() {
@@ -126,19 +126,19 @@ NA<N+M> u(NA<N> n, NA<M> m) {
 }
 
 
-// machine accepting # a1x1 + a2x2 + ... anxn <= b 
+// machine accepting # a1x1 + a2x2 + ... anxn <= b
 // ie: a . x <= b (where x0, x1, ... xn are variables ∈ N)
 // and (a1, a2, ... an, y) in Z.
 auto add(vector<int> as, int b) {
 	// transition function: Notation from book: Automata theory -- an algorithmic approach
-	// states: Integers	
+	// states: Integers
 	// State q recognizes tuples of c ∈ N^k such that a . c <= q
 
 	// Given state q and  a letter zeta ∈ {0,1}^n, A word w' ∈ ({0,1}^n)* is accepted
 	// from q' iff the word (zeta:w') is accepted from q.
 	// since we are encoding with LSB first,
 	//     zeta:w' = zeta + 2 c'. where c' ∈ N^n is encoded by w' ∈ ({0, 1}^n)*.
-	// 
+	//
 
 	// q ACCEPT (zeta:w') <==> q' ACCEPT w'
 	// q ACCEPT (zeta + 2c') <==> q' ACCEPT c'

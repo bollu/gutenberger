@@ -1,9 +1,10 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ViewPatterns #-}
 import qualified Data.Set as S
 import Data.Bits
-import Data.Monoid.Endo
+import Data.Monoid
 
 data NFA a where
     NFA :: (Ord s, Show s)  => S.Set s -- ^ universe: su
@@ -340,44 +341,64 @@ data H a s = H {
 
 
 -- | Refine a set with respect to another set
-refineWrt :: S.Set s -- ^ Y: to be refined
+refineWrt :: Ord s => S.Set s -- ^ Y: to be refined
   -> S.Set s -- ^ X: To refine with
   -> (S.Set s, S.Set s) -- ^ refinement: (Y/X, Y \cap X)
-refineWrt y x = (y S.\\ x, y S.intersection x)
+refineWrt y x = (y S.\\ x, y `S.intersection` x)
 
 
 -- | Replace the element a with [a]
-replaceSetElem ::  a -> [a] -> S.Set a -> S.Set a
-replaceSetElem x xs s = S.insert xs (S.delete x)
+replaceSetElem ::  Ord a => a -> [a] -> S.Set a -> S.Set a
+replaceSetElem a as s = S.union (S.fromList as) (S.delete a s)
 
 -- | Insert a set into the parititon. If the full set exists, then
 -- refine it in the worklist. Otherwise, add the smaller set
-insertWorklistPartition :: S.Set -> (S.Set, S.Set) -> Endo (H a s)
-insertWorklistPartition y (y1, y2)  = Endo $ \h ->
-  let wHasyY = S.contains (hw h) y
-      ysmall = if S.card y1 < S.card y2 then y1 else y2
+insertRefinedIntoWorklist ::
+  Ord s => S.Set s -- ^ Y: set that was refined
+        -> (S.Set s, S.Set s) -- ^ refinement of Y
+        -> Endo (H a s)
+insertRefinedIntoWorklist y (y1, y2)  = Endo $ \h ->
+  let wHasY = S.member y (hw h)
+      ysmall = if S.size y1 < S.size y2 then y1 else y2
   in if wHasY
     then
         -- | Worklist has Y, replace it
         h { hw = replaceSetElem y [y1, y2] (hw h)}
     else
         -- | Insert smaller set into the worklist to ensure n (log n)
-        h {hw = (hw h) `S.insert` ysmall  }
+        h {hw = ysmall `S.insert` (hw h)   }
 
 -- | Insert the partition into P, the set of partitions
-insertPartitionPartition :: S.Set s -> (S.Set s, S.Set s) -> Endo (H a s)
-insertPartitionPartition y (y1, y2) h = do
+insertRefinedIntoPartition :: Ord s =>
+    S.Set s -- ^ the full set Y
+    -> (S.Set s, S.Set s) -- ^ the refinement of y
+    -> Endo (H a s)
+insertRefinedIntoPartition y (y1, y2) = Endo $ \h ->
     h { hp = replaceSetElem y [y1, y2] (hp h) }
 
 
 -- | Perform computation for each character
-forEachCharacter :: Monoid v => (a -> v) -> H a s -> v
-forEachCharacter f h = foldMap f (ha h)
+forEachCharacter :: (a -> Endo (H a s)) -> Endo (H a s)
+forEachCharacter f = Endo $ \h -> runEndo h $ foldMap f (ha h)
+
+
+-- | For each set that is reverse-reachable from a transition over a
+-- given set. That is, provide all sets s' such that \exists c. s' -c-> s
+forEachRevTransition :: (Ord s, Eq s) =>
+    S.Set s  -- ^ Set to reverse-reach with: A
+    -> (S.Set s -- ^ Set that is reverse reachable from A for some character c
+        -> Endo (H a s))
+    -> Endo (H a s)
+forEachRevTransition a f =
+  forEachCharacter $ \c ->
+    Endo $ \h ->
+        -- | get set of states that reach A with character C
+        let x = revTransition (ht h) (hu h) a c
+        in runEndo h $ f x
 
 -- | Perform computation for each partition
-forEachPartition :: Monoid v => (S.Set s -> v) -> H a s -> v
-forEachPartition f h = foldMap f (hp h)
-
+forEachPartition :: (S.Set s -> Endo (H a s)) -> Endo (H a s)
+forEachPartition f = Endo $ \h -> runEndo h $ foldMap f (hp h)
 
 
 -- | A guard for monoids
@@ -386,24 +407,67 @@ guardMonoid False _ = mempty
 guardMonoid True m = m
 
 -- | Reverse transition relation
-revTransition :: (Ord s, Eq s) => (s -> a -> s) -- ^ transition
+revTransition :: (Ord s, Eq s) => (a -> s -> s) -- ^ transition
   -> S.Set s -- ^ universe
-  -> (S.Set s -> a -> S.Set s) -- ^ reversed transition: returns all sets such that on transition enters into the given set
-revTransition t u scur a = S.filter (\s -> scur `S.contains` (t s a)) su
+  -> S.Set s -- ^ set to enter into
+  -> a -- ^ character to transition on
+  -> S.Set s -- ^ reversed transition: returns all sets such that on transition enters into the given set
+revTransition t su ss a = S.filter (\s -> (t a s) `S.member` ss ) su
+
+-- | Take the first element from the worklist if posssible
+
+-- | For each refined partiion
+forEachRefinedPartition ::
+  Ord s
+  => S.Set s -- ^ set to refine against: x
+  -> ((S.Set s, S.Set s)  -- ^ partitions: (y1 = y / x, y2 = y \cap x)
+      -> S.Set s  -- ^ full set (y: y1 U y2)
+      -> Endo (H a s)) -- ^ computation on partitions
+  -> Endo (H a s)
+forEachRefinedPartition x f =
+    forEachPartition $
+       \y -> let (y1, y2) = y `refineWrt` x
+              in f (y1, y2) y
+
+-- | Combinator to run an Endo computation
+runEndo :: a -> Endo a -> a
+runEndo a f = appEndo f a
+
+-- | Perform a computation for each element in the worklist
+takeWorklist :: (S.Set s -> Endo (H a s)) -> Endo (H a s)
+takeWorklist f = Endo $ \h ->
+    if null (hw h)
+    then h
+    else let h' = h { hw = S.drop 1 (hw h) }
+             work =  (S.elemAt 0  (hw h))
+          in runEndo h' $ (f work)
 
 -- | https://en.wikipedia.org/wiki/DFA_minimization#Hopcroft's_algorithm
-refineStep :: Endo (H a s)
-refineStep = Endo $ \h ->
-  case (hw h) of
-    [] -> h -- worklist is empty
-    (a:as) ->  -- worklist has set A
-        forEachCharacter $ \(c :: a) ->
-            let (x :: S.Set s) = revTransition (ht h) (hu h) a  -- get set of states that reach A with character C
-            in forEachPartition $ \y -> -- for each set in the parition
-                let (y1, y2) = y `refineWrt` x
+refineStep :: Ord s => Endo (H a s)
+refineStep =
+     -- | take the tip from the worklist
+    takeWorklist $ \a ->
+        -- | for each set that is reverse-reachable from 'a' by a transition:
+        forEachRevTransition a $ \x ->
+            -- | Refine every set that we have by X, and add the new set
+            -- into the worklist and the parittion st
+            forEachRefinedPartition x $ \(y1, y2) y ->
                 -- ensure that neither partition is trivial
-                in guardMonoid (not . S.null $  y1) && (not . S.null $ y2) $ Endo $ \h ->
-                   insertPartitionPartition y (y1, y2) <>
-                   insertWorklistPartition y (y1, y2) <>
-                   refineStep
+                (guardMonoid ((not . S.null $  y1) && (not . S.null $ y2)) $
+                   -- | Insert the refined set into the partiiton and into
+                   -- the worklist, and then pull more from the worklist
+                   (insertRefinedIntoPartition y (y1, y2) <>
+                   insertRefinedIntoWorklist y (y1, y2)) <>
+                -- | Repeat the refinement
+                refineStep)
 
+
+-- | Extract the minimal DFA from the algorithm.
+minimalDFA :: S.Set a -- ^alphabet
+           -> DFA a -- DFA to minimize
+           -> DFA a
+minimalDFA a (DFA su si sf t) =
+    let partition = (S.fromList [si, sf])
+        worklist = S.singleton sf
+        hfinal = runEndo (H partition worklist su a t) $ refineStep
+     in undefined
