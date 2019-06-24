@@ -219,7 +219,14 @@ type Var = Int
 
 -- | Bitvector.
 newtype BV = BV Int deriving(Eq, Ord, Show, Bits)
+-- | little endian: 0th bit goes to least positoin
+-- eg. False False True --> 1 0 0
+-- eg. True False False --> 0 0 1
+-- invariant: (toBV bs .!. ix) == bs !! ix
+toBV :: [Bool] -> BV
+toBV bs = BV $ sum $ zipWith (\b ix -> if b then shiftL 1 ix else 0) bs [0,1..]
 
+-- Infix testBit.
 (.!.) :: BV -> Int -> Bool
 (.!.) (BV bv) ix = testBit bv ix
 
@@ -546,6 +553,45 @@ assert_ :: Bool -> String -> IO ()
 assert_ True _ = pure ()
 assert_ False s = error $ "failed check: " <> s
 
+
+-- | Number of bits needed to represent a number in 2s complement
+nbits2scomplement :: Int -> Int
+nbits2scomplement x =
+    let lb2 a = logBase 2 (fromIntegral (abs a))
+     in if x == 0
+        then 1
+        else if x >= 0
+        then 1 + ceiling (lb2 (x + 1))
+        else 1 + floor (lb2 x)
+
+
+-- | Number of bits if interpreted a natural number in base 2
+nbitsNatural :: Int -> Int
+nbitsNatural x =
+  if x < 0
+  then error $ show x <> " : cannot be negative as param to nbitsNatural"
+  else if x <= 1
+  then 1
+  else 1 + nbitsNatural (x // 2)
+
+-- | Convert a list of natural number to input that can
+-- be fed into the presburger engine as a list of bitvectors.
+-- *Main> mkInputBitsNatural [1, 3] -> [BV 3,BV 2]
+-- *Main> mkInputBitsNatural [1, 2] -> [BV 1,BV 2]
+-- *Main> mkInputBitsNatural [2, 2] -> [BV 0,BV 3]
+mkInputBitsNatural :: [Int] -> [BV]
+mkInputBitsNatural xs =
+  let maxPow2 = foldl1 max (map nbitsNatural xs) in
+  map (\i -> toBV $ map (`testBit` i) xs) [0..(maxPow2 - 1)]
+
+prop_dfa_bv :: [(Int, Int)] -> Int -> Bool
+prop_dfa_bv asAndXs p =
+    let as = map fst asAndXs
+        xs = map (abs . snd) asAndXs
+        out = sum (zipWith (*) as xs) <= p
+        dfa = dfaPresburgerNatural (as, p)
+        dfaInput = undefined
+     in undefined
 
 main :: IO ()
 main = do
