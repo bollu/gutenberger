@@ -470,4 +470,11 @@ minimalDFA a (DFA su si sf t) =
     let partition = (S.fromList [si, sf])
         worklist = S.singleton sf
         hfinal = runEndo (H partition worklist su a t) $ refineStep
-     in undefined
+        su' = hp hfinal
+        -- | should contain all initial states: NOTE: is this correct?
+        si'= S.filter (si `S.isSubsetOf`) $ su'
+        -- | should contain some final state
+        sf' = S.filter (`S.isSubsetOf` sf) $ su'
+        -- | To transition, find the equivalence class of the transitioned set
+        t' a ss = S.map (t a) ss
+     in DFA su' si' sf' t'
