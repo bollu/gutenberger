@@ -1,4 +1,4 @@
-# Squashberger: A solver for presburger arithmetic using finite automate encodings
+# Gutenberger: A solver for presburger arithmetic using finite automate encodings
 
 Presburger arithmetic is first order logic (forall, there exists) over real
 numbers, equipped with `(+, -, >=, <=, !=)` (notice the lack of multiplication.
