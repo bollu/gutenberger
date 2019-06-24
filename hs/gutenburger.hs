@@ -6,6 +6,17 @@ import qualified Data.Set as S
 import Data.Bits
 import Data.Monoid
 
+(//) :: Integral a => a -> a -> a
+(//) = quot
+
+
+-- | bit-width
+type Width = Int
+
+
+-- | number of steps we will transition
+type Steps = Int
+
 data NFA a where
     NFA :: (Ord s, Show s)  => S.Set s -- ^ universe: su
       -> (S.Set s) -- ^ initial: si
@@ -41,7 +52,7 @@ dfa2nfa (DFA su si sf t) = NFA su si sf t'
 -- Note that for us, number of steps = max bit-width
 -- and alphabet should usually be all bitstrings that have variables
 -- we care about toggled.
-dfaRemoveUnreachableAfterN :: Int -- ^ number of steps
+dfaRemoveUnreachableAfterN :: Steps -- ^ number of steps
                      -> S.Set a -- ^ alphabet
                      -> DFA a
                      -> DFA a
@@ -182,7 +193,7 @@ visitedAlphabet t as =
 
 
 visitedAlphabetN :: (Ord s, Ord a) => (a -> s -> S.Set s) -- transition relation
- -> Int -- ^ number of steps
+ -> Steps -- ^ number of steps
  -> S.Set a -- ^ alphabet
  -> S.Set s -- ^ initial state
  -> S.Set s -- ^ all reachable states
@@ -195,6 +206,10 @@ visitedAlphabetN t n as si =
 -- | Check whether NFA accepts
 runNFA :: NFA a -> [a] -> Bool
 runNFA (NFA _ si sf t) aa = intersects (nondetSequence t aa si) sf
+
+-- | Check whether the DFA accepts
+runDFA :: DFA a -> [a] -> Bool
+runDFA = runNFA . dfa2nfa
 
 -- | Now encode PA as NFAs
 
@@ -299,7 +314,7 @@ nfaRemoveUnreachableAfterN n as (NFA su si sf t) =
     in NFA (S.intersection su reached) si (S.intersection sf reached) t
 
 -- | Create the minimal DFA from the NFA after pruning with respect to steps and alphabet
-nfa2dfaMinimalAfterN :: Ord a => Int -> S.Set a -> NFA a -> DFA a
+nfa2dfaMinimalAfterN :: Ord a => Steps -> S.Set a -> NFA a -> DFA a
 nfa2dfaMinimalAfterN n as nfa = minimalDFA as . nfa2dfa . nfaRemoveUnreachableAfterN  n as $ nfa
 
 -- ^ State for hopcroft algorithm
@@ -450,6 +465,42 @@ minimalDFA a (DFA su si sf t) =
         -- | To transition, find the equivalence class of the transitioned set
         t' a ss = S.map (t a) ss
      in DFA su' si' sf' t'
+
+
+-- | Dot product of numbers with bit-vector
+bvdot :: [Int] -> BV -> Int
+bvdot xs bv = sum $ zipWith (\x ix -> if (bv .!. ix) then x else 0) xs [0..(length xs - 1)]
+
+
+-- | Create the transitive closure of the transition relation starting from
+-- the initial state "b" for the DFA for `a. x <= b`. See also @dfaPresburgerNatural
+dfaPresburgetNaturalUniverse ::
+  ([Int], Int) -- ^ tuple contains (a, b) for (a . x <= b)
+  -> S.Set Int
+dfaPresburgetNaturalUniverse (as, b) =
+    let
+      -- | alphabet to consider
+      zetas = bvPowerSet $ S.fromList $ [0..(length as - 1)]
+      -- | Transition given alphabet and state
+      t zeta q = (q - bvdot as zeta) // 2
+      -- | Fix set
+      fixSet f s = let s' = f s in if s == s' then s' else f s'
+    in
+      fixSet (\univ -> univ `S.union` (foldMap (\q -> S.map (\zeta -> t zeta q) zetas) univ)) $ S.singleton b
+
+
+
+-- | create a finite automata for a . x <= b, where a ∈ Z^n, p ∈ Z, x ∈ N^n
+dfaPresburgerNatural ::
+  ([Int], Int) -- ^ (Vector of a: [a !! i == coeff of BV .!. i], b) such that (a.x <= b)
+  -> DFA BV
+dfaPresburgerNatural (as, b) =
+    let su = dfaPresburgetNaturalUniverse (as, b)
+        si = S.singleton b -- ^ the initial state starts with our value
+        sf = S.filter (>= 0) su -- ^ all states that are >= 0 are final states since they accept the empty word
+        t zeta q = (q - bvdot as zeta) //  2
+    in DFA su si sf t
+
 
 
 -- | forall x. forall y. eq x y
