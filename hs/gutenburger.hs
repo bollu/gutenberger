@@ -6,8 +6,9 @@ import qualified Data.Set as S
 import Data.Bits
 import Data.Monoid
 
+-- | floor division. 3/2 = 1, (-3)/2 = -2
 (//) :: Integral a => a -> a -> a
-(//) = quot
+(//) =  div
 
 
 -- | bit-width
@@ -474,10 +475,10 @@ bvdot xs bv = sum $ zipWith (\x ix -> if (bv .!. ix) then x else 0) xs [0..(leng
 
 -- | Create the transitive closure of the transition relation starting from
 -- the initial state "b" for the DFA for `a. x <= b`. See also @dfaPresburgerNatural
-dfaPresburgetNaturalUniverse ::
+dfaPresburgerNaturalUniverse ::
   ([Int], Int) -- ^ tuple contains (a, b) for (a . x <= b)
   -> S.Set Int
-dfaPresburgetNaturalUniverse (as, b) =
+dfaPresburgerNaturalUniverse (as, b) =
     let
       -- | alphabet to consider
       zetas = bvPowerSet $ S.fromList $ [0..(length as - 1)]
@@ -495,7 +496,7 @@ dfaPresburgerNatural ::
   ([Int], Int) -- ^ (Vector of a: [a !! i == coeff of BV .!. i], b) such that (a.x <= b)
   -> DFA BV
 dfaPresburgerNatural (as, b) =
-    let su = dfaPresburgetNaturalUniverse (as, b)
+    let su = dfaPresburgerNaturalUniverse (as, b)
         si = S.singleton b -- ^ the initial state starts with our value
         sf = S.filter (>= 0) su -- ^ all states that are >= 0 are final states since they accept the empty word
         t zeta q = (q - bvdot as zeta) //  2
@@ -536,6 +537,11 @@ eg2 = forall 1 $ exists  0 $ eq 0 1
 eg3 :: NFA BV
 eg3 = exists 1 $ forall  0 $ eq 0 1
 
+
+-- | 2x - y <= 2
+eg4 :: DFA BV
+eg4 = dfaPresburgerNatural ([2, 3], 2)
+
 assert_ :: Bool -> String -> IO ()
 assert_ True _ = pure ()
 assert_ False s = error $ "failed check: " <> s
@@ -548,4 +554,9 @@ main = do
     assert_ (dfaAcceptsEmpty eg1'' == False) "eg1''"
     assert_ (nfaAcceptsEmpty eg2 == True) "eg2"
     assert_ (nfaAcceptsEmpty eg3 == False) "eg3"
+    -- 2x + 3y <= 2
+    assert_ (runDFA eg4 [BV 0] == True) "eg4 - 0"
+    assert_ (runDFA eg4 [BV 1] == True) "eg4 - 1"
+    assert_ (runDFA eg4 [BV 2] == False) "eg4 - 2"
+    assert_ (runDFA eg4 [BV 3] == False) "eg4 - 3"
     putStrLn $ "presburger"
