@@ -283,52 +283,24 @@ forall :: Var -> NFA BV -> NFA BV
 forall i = nfaComplement . exists i . nfaComplement
 
 -- | Check if NFA language accepts the empty string
-acceptsEmpty :: NFA a -> Bool
-acceptsEmpty (NFA su si sf t) = intersects si sf
-
--- | forall x. forall y. eq x y
--- acceptsEmpty eg1 =  False
-eg1 = forall 1 $ forall  0 $ eq 0 1
+nfaAcceptsEmpty :: NFA a -> Bool
+nfaAcceptsEmpty (NFA su si sf t) = intersects si sf
 
 
--- | Same as eg1, but with minmize in between
-eg1' =
-    let minimize = nfaMinimalAfterN 64 (bvPowerSet $ S.fromList $ [0..1])
-     in minimize $ forall 1 $ minimize $ forall 0 $ eq 0 1
+-- | Check if the DFA accepts the empty string
+dfaAcceptsEmpty :: DFA a -> Bool
+dfaAcceptsEmpty (DFA su si sf t) = intersects si sf
 
 
--- | forall x. exists y. eq x y
--- acceptsEmpty eg2 = true
-eg2 = forall 1 $ exists  0 $ eq 0 1
-
-
--- | exists x. forall y. eq x y
--- acceptsEmpty eg2 = false
-eg3 = exists 1 $ forall  0 $ eq 0 1
-
-assert_ :: Bool -> String -> IO ()
-assert_ True _ = pure ()
-assert_ False s = error $ "failed check: " <> s
-
-main :: IO ()
-main = do
-    assert_ (acceptsEmpty eg1 == False) "eg1"
-    assert_ (acceptsEmpty eg2 == True) "eg2"
-    assert_ (acceptsEmpty eg3 == False) "eg3"
-    putStrLn $ "presburger"
-
-nfaComplement' :: Int  -- ^ Number of steps
-               -> S.Set a --  ^ Alphabet
-               -> NFA a
-               -> NFA a
-nfaComplement' n as =
-  dfa2nfa . dfaMinimalAfterN n as . dfaComplement  . nfa2dfa
-
-
-nfaMinimalAfterN :: Ord a => Int -> S.Set a -> NFA a -> NFA a
-nfaMinimalAfterN n as (NFA su si sf t) =
+-- | Remove states from the NFA that are unreachable after N steps
+nfaRemoveUnreachableAfterN :: Ord a => Int -> S.Set a -> NFA a -> NFA a
+nfaRemoveUnreachableAfterN n as (NFA su si sf t) =
     let reached = visitedAlphabetN t n as si
     in NFA (S.intersection su reached) si (S.intersection sf reached) t
+
+-- | Create the minimal DFA from the NFA after pruning with respect to steps and alphabet
+nfa2dfaMinimalAfterN :: Ord a => Int -> S.Set a -> NFA a -> DFA a
+nfa2dfaMinimalAfterN n as nfa = minimalDFA as . nfa2dfa . nfaRemoveUnreachableAfterN  n as $ nfa
 
 -- ^ State for hopcroft algorithm
 data H a s = H {
@@ -462,10 +434,10 @@ refineStep =
                 refineStep)
 
 
--- | Extract the minimal DFA from the algorithm.
-minimalDFA :: S.Set a -- ^alphabet
+-- | Extract the minimal DFA from the Hopcroft.
+minimalDFA :: S.Set a -- ^ alphabet
            -> DFA a -- DFA to minimize
-           -> DFA a
+           -> DFA a -- DFA realized
 minimalDFA a (DFA su si sf t) =
     let partition = (S.fromList [si, sf])
         worklist = S.singleton sf
@@ -478,3 +450,51 @@ minimalDFA a (DFA su si sf t) =
         -- | To transition, find the equivalence class of the transitioned set
         t' a ss = S.map (t a) ss
      in DFA su' si' sf' t'
+
+
+-- | forall x. forall y. eq x y
+-- acceptsEmpty eg1 =  False
+eg1 :: NFA BV
+eg1 = forall 1 $ forall  0 $ eq 0 1
+
+
+
+-- | Same as eg1, but with minmize in between
+eg1' :: NFA BV
+eg1' =
+    let shrink = nfaRemoveUnreachableAfterN 64 (bvPowerSet $ S.fromList $ [0..1])
+     in shrink $ forall 1 $ shrink $ forall 0 $ eq 0 1
+
+-- | Same as eg1, but with minimal DFA
+eg1'' :: DFA BV
+eg1'' =
+    let shrink = nfaRemoveUnreachableAfterN 64 (bvPowerSet $ S.fromList $ [0..1])
+        minimize = nfa2dfaMinimalAfterN 64 (bvPowerSet $ S.fromList $ [0..1])
+     in minimize $ forall 1 $ shrink $ forall 0 $ eq 0 1
+
+
+
+-- | forall x. exists y. eq x y
+-- acceptsEmpty eg2 = true
+eg2 :: NFA BV
+eg2 = forall 1 $ exists  0 $ eq 0 1
+
+
+-- | exists x. forall y. eq x y
+-- acceptsEmpty eg2 = false
+eg3 :: NFA BV
+eg3 = exists 1 $ forall  0 $ eq 0 1
+
+assert_ :: Bool -> String -> IO ()
+assert_ True _ = pure ()
+assert_ False s = error $ "failed check: " <> s
+
+
+main :: IO ()
+main = do
+    assert_ (nfaAcceptsEmpty eg1 == False) "eg1"
+    assert_ (nfaAcceptsEmpty eg1' == False) "eg1'"
+    assert_ (dfaAcceptsEmpty eg1'' == False) "eg1''"
+    assert_ (nfaAcceptsEmpty eg2 == True) "eg2"
+    assert_ (nfaAcceptsEmpty eg3 == False) "eg3"
+    putStrLn $ "presburger"
