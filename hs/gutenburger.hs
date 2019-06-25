@@ -705,8 +705,8 @@ main = do
     assert_ (runDFA eg4 [BV 2] == False) "eg4 - 2"
     assert_ (runDFA eg4 [BV 3] == False) "eg4 - 3"
 
-    quickCheck qcToBV
-    quickCheck qcDFAPresburgerNatural
-    quickCheck qcNFAPresburgerInteger
+    quickCheck $ counterexample "qcToBV" qcToBV
+    quickCheck $ counterexample "qcDFA" qcDFAPresburgerNatural
+    quickCheck $ counterexample "qcNFA" qcNFAPresburgerInteger
     
     putStrLn $ "presburger"
