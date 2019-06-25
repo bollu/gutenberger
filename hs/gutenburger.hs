@@ -623,6 +623,11 @@ eg7 :: NFA BV
 eg7 = nfaPrZ ([-1], 0)
 
 
+-- | -3x <= 0
+eg8 :: NFA BV
+eg8 = nfaPrZ ([-3], 0)
+
+
 assert_ :: Bool -> String -> IO ()
 assert_ True _ = pure ()
 assert_ False s = error $ "failed check: " <> s
@@ -669,7 +674,7 @@ mkInputBitsN xs =
 mkInputBitsZ :: [Int] -> [BV]
 mkInputBitsZ xs =
   let maxnbits = foldl1 max (map nbits2scomplement xs)
-      xs' = map (\x -> if x > 0 then 2 * x else (-2 * x + 1)) xs
+      xs' = map (\x -> if x >= 0 then x else (-2 * x + 1)) xs
       sliceBits ix = toBV $ map (`testBit` ix) xs'
  in map sliceBits [0..(maxnbits - 1)]
 
@@ -746,6 +751,7 @@ main = do
     assert_ (runDFA eg5 (mkInputBitsN [2]) == True) "eg5"
     assert_ (runDFA eg6 (mkInputBitsN [4]) == True) "eg6"
     assert_ (runNFA eg7 (mkInputBitsZ [1]) == True) "eg7"
+    assert_ (runNFA eg8 (mkInputBitsZ [0]) == True) "eg8"
 
     quickCheck $ counterexample "qcToBV" qcToBV
     quickCheck $ counterexample "qcDFA" qcDFAPrN
