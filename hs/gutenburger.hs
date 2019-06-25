@@ -560,7 +560,7 @@ instance (Arbitrary a, KnownNat smax) => Arbitrary (ListMaxSized smax a) where
     return $ ListMaxSized xs
 
 -- quickCheck property for presburget set on Ns
-qcDFAPrN :: ListMaxSized 1 (Int, NonNegative Int) -> Int -> Bool
+qcDFAPrN :: ListMaxSized 5 (Int, NonNegative Int) -> Int -> Bool
 qcDFAPrN (ListMaxSized asAndXs) p =
     let as = map fst asAndXs
         xs = map (getNonNegative . snd) asAndXs
@@ -727,7 +727,7 @@ nfaPrZ (as, b) =
      in NFA su si sf t
 
 -- quickCheck property for presburget set on Zs
-qcNFAPrZ :: ListMaxSized 1 (Int, Int) -> Int -> Bool
+qcNFAPrZ :: ListMaxSized 5 (Int, Int) -> Int -> Bool
 qcNFAPrZ (ListMaxSized asAndXs) p =
     let as = map fst asAndXs
         xs = map (abs . snd) asAndXs
