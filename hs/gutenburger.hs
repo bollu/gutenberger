@@ -618,6 +618,10 @@ eg5 = dfaPrN ([-1], -2)
 eg6 :: DFA BV
 eg6 = dfaPrN ([-7], -3)
 
+-- | -x <= 0
+eg7 :: NFA BV
+eg7 = nfaPrZ ([-1], 0)
+
 
 assert_ :: Bool -> String -> IO ()
 assert_ True _ = pure ()
@@ -718,14 +722,14 @@ nfaPrZ (as, b) =
      in NFA su si sf t
 
 -- quickCheck property for presburget set on Zs
-qcNFAPrZ :: ListMaxSized 5 (Int, Int) -> Int -> Bool
+qcNFAPrZ :: ListMaxSized 1 (Int, Int) -> Int -> Bool
 qcNFAPrZ (ListMaxSized asAndXs) p =
     let as = map fst asAndXs
         xs = map (abs . snd) asAndXs
         out = sum (zipWith (*) as xs) <= p
         nfa = nfaPrZ (as, p)
         input = mkInputBitsZ xs
-     in runNFA nfa  input == out
+     in runNFA nfa input == out
 
 main :: IO ()
 main = do
@@ -741,6 +745,7 @@ main = do
     assert_ (runDFA eg4 [BV 3] == False) "eg4 - 3"
     assert_ (runDFA eg5 (mkInputBitsN [2]) == True) "eg5"
     assert_ (runDFA eg6 (mkInputBitsN [4]) == True) "eg6"
+    assert_ (runNFA eg7 (mkInputBitsZ [1]) == True) "eg7"
 
     quickCheck $ counterexample "qcToBV" qcToBV
     quickCheck $ counterexample "qcDFA" qcDFAPrN
