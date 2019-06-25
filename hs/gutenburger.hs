@@ -2,10 +2,19 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE DataKinds #-}
+
 import qualified Data.Set as S
 import Data.Bits
 import Data.Monoid
 import Test.QuickCheck
+import GHC.TypeLits
+import Data.Proxy
+
+--- Automata theory: An algorithmic approach
+--  https://www7.in.tum.de/~esparza/autoskript.pdf
+--      - Chapter 10: Applications III - presburger arithmetic
 
 -- | floor division. 3/2 = 1, (-3)/2 = -2
 (//) :: Integral a => a -> a -> a
@@ -522,6 +531,26 @@ dfaPresburgerNatural (as, b) =
     in DFA su si sf t
 
 
+newtype ListMaxSized (smax :: Nat) (a :: *) =
+  ListMaxSized [a] deriving(Eq, Show, Ord)
+
+
+instance (Arbitrary a, KnownNat smax) => Arbitrary (ListMaxSized smax a) where
+  arbitrary = do
+    n <- choose (1, natVal (Proxy :: Proxy smax))
+    xs <- vectorOf (fromInteger n) arbitrary
+    return $ ListMaxSized xs
+
+-- quickCheck property for presburget set on naturals
+qcDFAPresburgerNatural :: ListMaxSized 5 (Int, NonNegative Int) -> Int -> Bool
+qcDFAPresburgerNatural (ListMaxSized asAndXs) p =
+    let as = map fst asAndXs
+        xs = map (abs . getNonNegative . snd) asAndXs
+        out = sum (zipWith (*) as xs) <= p
+        dfa = dfaPresburgerNatural (as, p)
+        input = mkInputBitsNatural xs
+     in runDFA dfa input == out
+
 
 -- | forall x. forall y. eq x y
 -- acceptsEmpty eg1 =  False
@@ -593,19 +622,78 @@ nbitsNatural x =
 -- *Main> mkInputBitsNatural [2, 2] -> [BV 0,BV 3]
 mkInputBitsNatural :: [Int] -> [BV]
 mkInputBitsNatural xs =
-  let maxPow2 = foldl1 max (map nbitsNatural xs) in
-  map (\i -> toBV $ map (`testBit` i) xs) [0..(maxPow2 - 1)]
+  let maxnbits = foldl1 max (map nbitsNatural xs) in
+  map (\i -> toBV $ map (`testBit` i) xs) [0..(maxnbits - 1)]
 
 
--- quickCheck property for presburget set on naturals
-qcDFAPresburgerNatural :: [(Int, Int)] -> Int -> Bool
-qcDFAPresburgerNatural asAndXs p =
+-- | Convert a list of integers to input that can be fed into
+-- the presburger engine as a list of bitvectrs
+-- *Main> mkInputBits2scomplement [-3]: [BV 1,BV 1]
+-- *Main> mkInputBits2scomplement [-1]: [BV 1]
+-- *Main> mkInputBits2scomplement [2]: [BV 0,BV 0,BV 1]
+-- *Main> mkInputBits2scomplement [1]: [BV 0,BV 1]
+mkInputBits2scomplement :: [Int] -> [BV]
+mkInputBits2scomplement xs =
+  let maxnbits = foldl1 max (map nbits2scomplement xs)
+      xs' = map (\x -> if x > 0 then 2 * x else (-2 * x + 1)) xs
+      sliceBits ix = toBV $ map (`testBit` ix) xs'
+ in map sliceBits [0..(maxnbits - 1)]
+
+
+
+-- | States in the integer automata
+data PresState = PSInt Int | PSFinal deriving(Eq, Show, Ord)
+
+
+nfaPresburgerIntegerTransition ::
+  ([Int], Int)
+  -> BV
+  -> PresState
+  -> S.Set PresState
+nfaPresburgerIntegerTransition _ _ PSFinal = S.empty
+nfaPresburgerIntegerTransition (as, b) zeta (PSInt q) =
+  let j = (q - bvdot as zeta) // 2
+      j' = q + bvdot as zeta
+      qf = if j' >= 0 then [PSFinal] else []
+   in S.fromList $ qf ++ [PSInt j]
+
+-- | Create the transitive closure of the transition relation starting from
+-- the initial state "b" for the DFA for `a. x <= b`. See also @dfaPresburgerNatural
+nfaPresburgerIntegerUniverse ::
+  ([Int], Int) -- ^ tuple contains (a, b) for (a . x <= b)
+  -> S.Set PresState
+nfaPresburgerIntegerUniverse (as, b) =
+    let
+      -- | alphabet to consider (this is slightly wrong)
+      zetas = bvPowerSet $ S.fromList $ [0..(length as - 1)]
+      -- | Fix set
+      fixSet f s = let s' = f s in if s == s' then s' else f s'
+      t = nfaPresburgerIntegerTransition (as, b)
+    in
+      fixSet (\univ -> univ `S.union`
+      (foldMap (\q ->
+          foldMap (\zeta -> t zeta q) zetas) univ)) $ S.singleton $ PSInt b
+
+
+-- | NFA, can solve a . x <= b for a, x ∈ Z^n, b ∈ Z
+nfaPresburgerInteger :: ([Int], Int) -- as, b
+  -> NFA BV
+nfaPresburgerInteger (as, b) =
+    let su = nfaPresburgerIntegerUniverse (as, b)
+        t = nfaPresburgerIntegerTransition (as, b)
+        sf = S.singleton PSFinal
+        si = S.singleton (PSInt b)
+     in NFA su si sf t
+
+-- quickCheck property for presburget set on integers
+qcNFAPresburgerInteger :: ListMaxSized 5 (Int, Int) -> Int -> Bool
+qcNFAPresburgerInteger (ListMaxSized asAndXs) p =
     let as = map fst asAndXs
         xs = map (abs . snd) asAndXs
         out = sum (zipWith (*) as xs) <= p
-        dfa = dfaPresburgerNatural (as, p)
-        dfaInput = mkInputBitsNatural xs
-     in runDFA dfa  dfaInput == out
+        nfa = nfaPresburgerInteger (as, p)
+        input = mkInputBits2scomplement xs
+     in runNFA nfa  input == out
 
 main :: IO ()
 main = do
@@ -621,4 +709,7 @@ main = do
     assert_ (runDFA eg4 [BV 3] == False) "eg4 - 3"
 
     quickCheck qcToBV
+    quickCheck qcDFAPresburgerNatural
+    quickCheck qcNFAPresburgerInteger
+    
     putStrLn $ "presburger"
