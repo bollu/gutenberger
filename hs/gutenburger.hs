@@ -243,13 +243,10 @@ toBV bs = BV $ sum $ zipWith (\b ix -> if b then shiftL 1 ix else 0) bs [0,1..]
 
 
 -- | QuickCheck for toBV
-qcToBV :: [Bool] -> Bool
-qcToBV bs =
-  let l = length bs
-      ixs = [0..(l-1)]
-   in
-   if l > 31 then True
-   else getAll $ mconcat $ map All $ map (\ix -> toBV bs .!. ix == bs !! ix) ixs
+qcToBV :: ListMaxSized 32 Bool -> Bool
+qcToBV (ListMaxSized bs) =
+  let ixs = [0..(length bs) - 1]
+  in getAll $ mconcat $ map All $ map (\ix -> toBV bs .!. ix == bs !! ix) ixs
 
 -- | Given indeces, create powerset of bitvectors with those indeces toggled
 bvPowerSet :: S.Set Int -> S.Set BV
