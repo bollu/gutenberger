@@ -14,7 +14,7 @@ import Data.Proxy
 
 --- Automata theory: An algorithmic approach
 --  https://www7.in.tum.de/~esparza/autoskript.pdf
---      - Chapter 10: Applications III - presburger arithmetic
+--      - Chapter 10: Applications III - Pr arithmetic
 
 -- | floor division. 3/2 = 1, (-3)/2 = -2
 (//) :: Integral a => a -> a -> a
@@ -29,14 +29,14 @@ type Width = Int
 type Steps = Int
 
 data NFA a where
-    NFA :: (Ord s, Show s)  => S.Set s -- ^ universe: su
+    NFA :: (Ord s, Show s)  => S.Set s -- ^ Univ: su
       -> (S.Set s) -- ^ initial: si
       -> (S.Set s) -- ^ final: sf
       -> (a -> s -> S.Set s) -- ^ transition: t
       -> NFA a
 
 data DFA a where
-    DFA :: (Ord s, Show s) => S.Set s -- ^ universe: su
+    DFA :: (Ord s, Show s) => S.Set s -- ^ Univ: su
      -> (S.Set s)  -- ^ initial: si
      -> (S.Set s)  -- ^ final: sf
      -> (a -> s -> s)  -- ^ transition: t
@@ -78,7 +78,7 @@ dfaRemoveUnreachableAfterN n as (DFA su si sf t) =
 {-
 dfaRefinePartition :: S.Set a -- ^ Alphabet
   -> (s -> a -> s) -- transition
-  -> S.Set s -- universe (U)
+  -> S.Set s -- Univ (U)
   -> S.Set (S.Set s) -- partition (P)
   -> [(S.Set s)] -- worklist (W)
   -> (S.Set (S.Set s)) -- new parittion
@@ -95,7 +95,7 @@ dfaMinimalAfterN :: Int -> S.Set a -> DFA a -> DFA a
 dfaMinimalAfterN = dfaRemoveUnreachableAfterN
 
 -- | nfa reversal
--- To transition, apply the transition map on the universe,
+-- To transition, apply the transition map on the Univ,
 -- and keep all the sets that reach the current set. This is
 -- effectively a nfaReverse of the NFA transition, since we now return
 -- all sets that _enter_ the current set.
@@ -123,14 +123,14 @@ dfaStateSpaceCard (DFA su si sf _) = (S.size su, S.size si, S.size sf)
 debugNFA :: NFA a -> IO ()
 debugNFA (NFA su si sf t) = do
     putStrLn $ "univ: " <> show su
-    putStrLn $ "initial: " <> show su
-    putStrLn $ "final: " <> show su
+    putStrLn $ "initial: " <> show si
+    putStrLn $ "final: " <> show sf
 
 debugDFA :: DFA a -> IO ()
 debugDFA (DFA su si sf t) = do
     putStrLn $ "univ: " <> show su
-    putStrLn $ "initial: " <> show su
-    putStrLn $ "final: " <> show su
+    putStrLn $ "initial: " <> show si
+    putStrLn $ "final: " <> show sf
 
 -- | Disjoint union of two sets
 disjointUnion :: (Ord a, Ord b) =>
@@ -175,7 +175,7 @@ nondet f a s = foldMap (f a) s
 
 -- | Run multiple steps of the NFA
 nondetSequence :: Ord s => Foldable g  => (a -> s -> S.Set s) -> g a -> S.Set s -> S.Set s
-nondetSequence f aa ss = foldr (nondet f) ss aa
+nondetSequence f aa ss = foldl (flip $ nondet f) ss aa
 
 
 -- | Check if two sets have non-empty intersection
@@ -216,15 +216,25 @@ visitedAlphabetN t n as si =
 
 -- | Check whether NFA accepts
 runNFA :: NFA a -> [a] -> Bool
-runNFA (NFA _ si sf t) aa = intersects (nondetSequence t aa si) sf
-
--- | Check whether the DFA accepts
-runDFA :: DFA a -> [a] -> Bool
-runDFA = runNFA . dfa2nfa
-
+-- runNFA (NFA _ si sf t) aa = intersects (nondetSequence t aa si) sf
+runNFA (NFA _ si sf t) as =
+    -- go :: [a] -> S.Set s -> S.Set s
+    let go [] ss = ss
+        go (a:as) ss = go as (foldMap (t a) ss)
+    in intersects sf (go as si)
+                         --
+-- | Check whether the DF-- A accepts
+runDFA :: DFA a -> [a] ->  Bool
+-- runDFA dfa as = runNFA--  (dfa2nfa dfa) as
+runDFA (DFA su si sf t) as =
+    -- go :: [a] -> S.Set s -> S.Set s
+    let go [] ss = ss
+        go (a:as) ss = go as (S.map (t a) ss)
+    in intersects sf (go as si)
+--
 -- | Now encode PA as NFAs
 
--- | Key for the variable: ith variable is natural number i.
+-- | Key for the variable: ith variable is N number i.
 type Var = Int
 
 -- | Bitvector.
@@ -347,7 +357,7 @@ nfa2dfaMinimalAfterN n as nfa = minimalDFA as . nfa2dfa . nfaRemoveUnreachableAf
 data H a s = H {
   hp :: S.Set (S.Set s) -- ^ partitions
   , hw :: S.Set (S.Set s) -- ^ worklist
-  , hu :: S.Set s -- ^ universe set
+  , hu :: S.Set s -- ^ Univ set
   , ha :: S.Set a -- ^ alphabet
   , ht :: (a -> s -> s) -- ^ transition relation
 }
@@ -421,7 +431,7 @@ guardMonoid True m = m
 
 -- | Reverse transition relation
 revTransition :: (Ord s, Eq s) => (a -> s -> s) -- ^ transition
-  -> S.Set s -- ^ universe
+  -> S.Set s -- ^ Univ
   -> S.Set s -- ^ set to enter into
   -> a -- ^ character to transition on
   -> S.Set s -- ^ reversed transition: returns all sets such that on transition enters into the given set
@@ -495,36 +505,47 @@ minimalDFA a (DFA su si sf t) =
 
 -- | Dot product of numbers with bit-vector
 bvdot :: [Int] -> BV -> Int
-bvdot xs bv = sum $ zipWith (\x ix -> if (bv .!. ix) then x else 0) xs [0..(length xs - 1)]
+bvdot xs bv =
+  sum $ zipWith (\x ix -> if (bv .!. ix) then x else 0)
+                xs [0..(length xs - 1)]
+
+
+dfaPrNTransition ::
+  ([Int], Int) -- as, b
+  -> BV -- ^ input bitvector
+  -> Int -- ^ state of the DFA
+  -> Int -- ^ output state of the DFA
+dfaPrNTransition (as, b) zeta q = (q - bvdot as zeta) // 2
 
 
 -- | Create the transitive closure of the transition relation starting from
--- the initial state "b" for the DFA for `a. x <= b`. See also @dfaPresburgerNatural
-dfaPresburgerNaturalUniverse ::
+-- the initial state "b" for the DFA for `a. x <= b`. See also @dfaPrN
+dfaPrNUniv ::
   ([Int], Int) -- ^ tuple contains (a, b) for (a . x <= b)
   -> S.Set Int
-dfaPresburgerNaturalUniverse (as, b) =
+dfaPrNUniv (as, b) =
     let
       -- | alphabet to consider
       zetas = bvPowerSet $ S.fromList $ [0..(length as - 1)]
       -- | Transition given alphabet and state
-      t zeta q = (q - bvdot as zeta) // 2
+      t = dfaPrNTransition (as, b)
       -- | Fix set
-      fixSet f s = let s' = f s in if s == s' then s' else f s'
+      fixSet f s = let s' = f s in if s' == s then s' else fixSet f s'
     in
-      fixSet (\univ -> univ `S.union` (foldMap (\q -> S.map (\zeta -> t zeta q) zetas) univ)) $ S.singleton b
+      fixSet (\univ -> univ `S.union` (S.map (uncurry t) (zetas `S.cartesianProduct` univ))) $
+        S.singleton b
 
 
 
 -- | create a finite automata for a . x <= b, where a ∈ Z^n, p ∈ Z, x ∈ N^n
-dfaPresburgerNatural ::
+dfaPrN ::
   ([Int], Int) -- ^ (Vector of a: [a !! i == coeff of BV .!. i], b) such that (a.x <= b)
   -> DFA BV
-dfaPresburgerNatural (as, b) =
-    let su = dfaPresburgerNaturalUniverse (as, b)
+dfaPrN (as, b) =
+    let su = dfaPrNUniv (as, b)
         si = S.singleton b -- ^ the initial state starts with our value
         sf = S.filter (>= 0) su -- ^ all states that are >= 0 are final states since they accept the empty word
-        t zeta q = (q - bvdot as zeta) //  2
+        t = dfaPrNTransition (as, b)
     in DFA su si sf t
 
 
@@ -538,14 +559,14 @@ instance (Arbitrary a, KnownNat smax) => Arbitrary (ListMaxSized smax a) where
     xs <- vectorOf (fromInteger n) arbitrary
     return $ ListMaxSized xs
 
--- quickCheck property for presburget set on naturals
-qcDFAPresburgerNatural :: ListMaxSized 5 (Int, NonNegative Int) -> Int -> Bool
-qcDFAPresburgerNatural (ListMaxSized asAndXs) p =
+-- quickCheck property for presburget set on Ns
+qcDFAPrN :: ListMaxSized 1 (Int, NonNegative Int) -> Int -> Bool
+qcDFAPrN (ListMaxSized asAndXs) p =
     let as = map fst asAndXs
-        xs = map (abs . getNonNegative . snd) asAndXs
+        xs = map (getNonNegative . snd) asAndXs
         out = sum (zipWith (*) as xs) <= p
-        dfa = dfaPresburgerNatural (as, p)
-        input = mkInputBitsNatural xs
+        dfa = dfaPrN (as, p)
+        input = mkInputBitsN xs
      in runDFA dfa input == out
 
 
@@ -585,7 +606,18 @@ eg3 = exists 1 $ forall  0 $ eq 0 1
 
 -- | 2x - y <= 2
 eg4 :: DFA BV
-eg4 = dfaPresburgerNatural ([2, 3], 2)
+eg4 = dfaPrN ([2, 3], 2)
+
+
+-- | -x <= -2
+eg5 :: DFA BV
+eg5 = dfaPrN ([-1], -2)
+
+
+-- | -7x <= -3
+eg6 :: DFA BV
+eg6 = dfaPrN ([-7], -3)
+
 
 assert_ :: Bool -> String -> IO ()
 assert_ True _ = pure ()
@@ -603,34 +635,35 @@ nbits2scomplement x =
         else 1 + floor (lb2 x)
 
 
--- | Number of bits if interpreted a natural number in base 2
-nbitsNatural :: Int -> Int
-nbitsNatural x =
+-- | Number of bits if interpreted a N number in base 2
+nbitsN :: Int -> Int
+nbitsN x =
   if x < 0
-  then error $ show x <> " : cannot be negative as param to nbitsNatural"
+  then error $ show x <> " : cannot be negative as param to nbitsN"
   else if x <= 1
   then 1
-  else 1 + nbitsNatural (x // 2)
+  else 1 + nbitsN (x // 2)
 
--- | Convert a list of natural number to input that can
--- be fed into the presburger engine as a list of bitvectors.
--- *Main> mkInputBitsNatural [1, 3] -> [BV 3,BV 2]
--- *Main> mkInputBitsNatural [1, 2] -> [BV 1,BV 2]
--- *Main> mkInputBitsNatural [2, 2] -> [BV 0,BV 3]
-mkInputBitsNatural :: [Int] -> [BV]
-mkInputBitsNatural xs =
-  let maxnbits = foldl1 max (map nbitsNatural xs) in
+-- | Convert a list of N number to input that can
+-- be fed into the Pr engine as a list of bitvectors.
+-- *Main> mkInputBitsN [1, 3] -> [BV 3,BV 2]
+-- *Main> mkInputBitsN [1, 2] -> [BV 1,BV 2]
+-- *Main> mkInputBitsN [2, 2] -> [BV 0,BV 3]
+mkInputBitsN :: [Int] -> [BV]
+mkInputBitsN xs =
+  let maxnbits = foldl1 max (map nbitsN xs) in
   map (\i -> toBV $ map (`testBit` i) xs) [0..(maxnbits - 1)]
 
 
--- | Convert a list of integers to input that can be fed into
--- the presburger engine as a list of bitvectrs
--- *Main> mkInputBits2scomplement [-3]: [BV 1,BV 1]
--- *Main> mkInputBits2scomplement [-1]: [BV 1]
--- *Main> mkInputBits2scomplement [2]: [BV 0,BV 0,BV 1]
--- *Main> mkInputBits2scomplement [1]: [BV 0,BV 1]
-mkInputBits2scomplement :: [Int] -> [BV]
-mkInputBits2scomplement xs =
+-- | Convert a list of integerss to 2s complement
+-- input that can be fed into the Presburger
+-- engine as a list of bitvectrs.
+-- *Main> mkInputBitsZ [-3]: [BV 1,BV 1]
+-- *Main> mkInputBitsZ [-1]: [BV 1]
+-- *Main> mkInputBitsZ [2]: [BV 0,BV 0,BV 1]
+-- *Main> mkInputBitsZ [1]: [BV 0,BV 1]
+mkInputBitsZ :: [Int] -> [BV]
+mkInputBitsZ xs =
   let maxnbits = foldl1 max (map nbits2scomplement xs)
       xs' = map (\x -> if x > 0 then 2 * x else (-2 * x + 1)) xs
       sliceBits ix = toBV $ map (`testBit` ix) xs'
@@ -638,34 +671,36 @@ mkInputBits2scomplement xs =
 
 
 
--- | States in the integer automata
+-- | States in the Presburger Z automata.
+-- We need to add a dedicated final state
 data PresState = PSInt Int | PSFinal deriving(Eq, Show, Ord)
 
 
-nfaPresburgerIntegerTransition ::
+-- | Transition relation for NFA
+nfaPrZTransition ::
   ([Int], Int)
   -> BV
   -> PresState
   -> S.Set PresState
-nfaPresburgerIntegerTransition _ _ PSFinal = S.empty
-nfaPresburgerIntegerTransition (as, b) zeta (PSInt q) =
+nfaPrZTransition _ _ PSFinal = S.empty
+nfaPrZTransition (as, b) zeta (PSInt q) =
   let j = (q - bvdot as zeta) // 2
       j' = q + bvdot as zeta
       qf = if j' >= 0 then [PSFinal] else []
    in S.fromList $ qf ++ [PSInt j]
 
 -- | Create the transitive closure of the transition relation starting from
--- the initial state "b" for the DFA for `a. x <= b`. See also @dfaPresburgerNatural
-nfaPresburgerIntegerUniverse ::
+-- the initial state "b" for the DFA for `a. x <= b`. See also @dfaPrN
+nfaPrZUniv ::
   ([Int], Int) -- ^ tuple contains (a, b) for (a . x <= b)
   -> S.Set PresState
-nfaPresburgerIntegerUniverse (as, b) =
+nfaPrZUniv (as, b) =
     let
       -- | alphabet to consider (this is slightly wrong)
       zetas = bvPowerSet $ S.fromList $ [0..(length as - 1)]
       -- | Fix set
-      fixSet f s = let s' = f s in if s == s' then s' else f s'
-      t = nfaPresburgerIntegerTransition (as, b)
+      fixSet f s = let s' = f s in if s == s' then s' else fixSet f s'
+      t = nfaPrZTransition (as, b)
     in
       fixSet (\univ -> univ `S.union`
       (foldMap (\q ->
@@ -673,23 +708,23 @@ nfaPresburgerIntegerUniverse (as, b) =
 
 
 -- | NFA, can solve a . x <= b for a, x ∈ Z^n, b ∈ Z
-nfaPresburgerInteger :: ([Int], Int) -- as, b
+nfaPrZ :: ([Int], Int) -- as, b
   -> NFA BV
-nfaPresburgerInteger (as, b) =
-    let su = nfaPresburgerIntegerUniverse (as, b)
-        t = nfaPresburgerIntegerTransition (as, b)
+nfaPrZ (as, b) =
+    let su = nfaPrZUniv (as, b)
+        t = nfaPrZTransition (as, b)
         sf = S.singleton PSFinal
         si = S.singleton (PSInt b)
      in NFA su si sf t
 
--- quickCheck property for presburget set on integers
-qcNFAPresburgerInteger :: ListMaxSized 5 (Int, Int) -> Int -> Bool
-qcNFAPresburgerInteger (ListMaxSized asAndXs) p =
+-- quickCheck property for presburget set on Zs
+qcNFAPrZ :: ListMaxSized 5 (Int, Int) -> Int -> Bool
+qcNFAPrZ (ListMaxSized asAndXs) p =
     let as = map fst asAndXs
         xs = map (abs . snd) asAndXs
         out = sum (zipWith (*) as xs) <= p
-        nfa = nfaPresburgerInteger (as, p)
-        input = mkInputBits2scomplement xs
+        nfa = nfaPrZ (as, p)
+        input = mkInputBitsZ xs
      in runNFA nfa  input == out
 
 main :: IO ()
@@ -704,9 +739,11 @@ main = do
     assert_ (runDFA eg4 [BV 1] == True) "eg4 - 1"
     assert_ (runDFA eg4 [BV 2] == False) "eg4 - 2"
     assert_ (runDFA eg4 [BV 3] == False) "eg4 - 3"
+    assert_ (runDFA eg5 (mkInputBitsN [2]) == True) "eg5"
+    assert_ (runDFA eg6 (mkInputBitsN [4]) == True) "eg6"
 
     quickCheck $ counterexample "qcToBV" qcToBV
-    quickCheck $ counterexample "qcDFA" qcDFAPresburgerNatural
-    quickCheck $ counterexample "qcNFA" qcNFAPresburgerInteger
-    
-    putStrLn $ "presburger"
+    quickCheck $ counterexample "qcDFA" qcDFAPrN
+    quickCheck $ counterexample "qcNFA" qcNFAPrZ
+
+    putStrLn $ "Pr"
